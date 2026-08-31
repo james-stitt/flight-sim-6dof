@@ -1,0 +1,19 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Editor and OS files
+.vscode/
+.DS_Store
+*.swp
+
+# Simulation output data/logs
+*.csv
+*.mat
+*.png
