@@ -2,7 +2,7 @@ import math
 import numpy as np
 
 
-def flat_earth_eom(t, x, amod):
+def flat_earth_eom(t, x, vmod, amod):
     """
     Arguments:
         t - time [s], scalar
@@ -19,7 +19,8 @@ def flat_earth_eom(t, x, amod):
             x[9] - p1_n_m, x position of aircraft resolved in NED frame
             x[10] - p2_n_m, y position of aircraft resolved in NED frame
             x[11] - p3_n_m, z position of aircraft resolved in NED frame
-        amod - aircraft model data, dictionary
+        vmod - vehicle model data, dictionary
+        amod - airodynamic model data, dictionary
 
     Returns:
         dx - time derivative of state vector x
@@ -55,37 +56,56 @@ def flat_earth_eom(t, x, amod):
     omega_b = x[3:6]  # [p_b_rps, q_b_rps, r_b_rps]
 
     # Mass and moments of inertia
-    m_kg = amod['m_kg']
-    I = amod['I']
-    I_inv = amod['I_inv']
+    m_kg = vmod['m_kg']
+    I = vmod['I']
+    I_inv = vmod['I_inv']
 
-    #I = np.array([
-    #    [ Jxx_b_kgm2,         0.0, -Jxz_b_kgm2],
-    #    [        0.0,  Jyy_b_kgm2,         0.0],
-    #    [-Jxz_b_kgm2,         0.0,  Jzz_b_kgm2]
-    #])
-    #I_inv = np.linalg.inv(I)
-
-    # Air Data
+    # Current altitude
+    h_m = -p3_n_m
 
     # Atmosphere Model
+    rho_interp_kgpm3 = np.interp(h_m, amod["alt_m"], amod["rho_kgpm3"])
+    c_interp_mps     = np.interp(h_m, amod["alt_m"], amod["c_mps"])
+
+
+    # Air Data
+    true_airspeed_mps = np.linalg.norm(v_b)
+    qbar_kgpms2       = 0.5 * rho_interp_kgpm3 * true_airspeed_mps**2
+
+    alpha_rad = math.atan2(w_b_mps, u_b_mps)
+    if true_airspeed_mps > 1e-5:
+        beta_rad = math.asin(max(-1.0, min(1.0, v_b_mps / true_airspeed_mps)))
+    else:
+        beta_rad = 0.0
+    s_alpha   = math.sin(alpha_rad)
+    c_alpha   = math.cos(alpha_rad)
+    s_beta    = math.sin(beta_rad)
+    c_beta    = math.cos(beta_rad)
 
     # Gravity in NED frame
-    gz_n_mps2 = 9.81
+    gz_interp_n_mps2 = np.interp(h_m, amod["alt_m"], amod['g_mps2'])
 
     # Resolve gravity to body frame
-    gx_b_mps2 = -math.sin(theta_rad) * gz_n_mps2
-    gy_b_mps2 = math.sin(phi_rad) * math.cos(theta_rad) * gz_n_mps2
-    gz_b_mps2 = math.cos(phi_rad) * math.cos(theta_rad) * gz_n_mps2
+    gx_b_mps2 = -math.sin(theta_rad) * gz_interp_n_mps2
+    gy_b_mps2 = math.sin(phi_rad) * math.cos(theta_rad) * gz_interp_n_mps2
+    gz_b_mps2 = math.cos(phi_rad) * math.cos(theta_rad) * gz_interp_n_mps2
 
     g_b = np.array([gx_b_mps2, gy_b_mps2, gz_b_mps2])
 
-    # External Forces
-    Fx_b_kgmps2 = 0
-    Fy_b_kgmps2 = 0
-    Fz_b_kgmps2 = 0
+    # Aerodynamic Forces
+    drag_kgmps2 = vmod["CD_approx"]*qbar_kgpms2*vmod["Aref_m2"]
+    side_kgmps2 = 0
+    lift_kgmps2 = 0
 
-    F_b = np.array([Fx_b_kgmps2, Fy_b_kgmps2, Fz_b_kgmps2])
+    # External Forces
+    R_w_to_b = np.array([
+        [ c_alpha * c_beta, -c_alpha * s_beta, -s_alpha],
+        [           s_beta,            c_beta,      0.0],
+        [ s_alpha * c_beta, -s_alpha * s_beta,  c_alpha]
+    ])
+
+    # F_aero_w = [Drag, Side, Lift]
+    F_b = -R_w_to_b @ np.array([drag_kgmps2, side_kgmps2, lift_kgmps2])
 
     # External Moments
     l_b_kgm2ps2 = 0
