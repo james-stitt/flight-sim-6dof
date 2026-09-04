@@ -26,7 +26,7 @@ def flat_earth_eom(t, x, amod):
     """
 
     # Preallocation of dx
-    dx = np.zeros(12)
+    dx = np.empty((12,), dtype=float)
 
     # Assign variable names
     u_b_mps = x[0]
@@ -92,14 +92,24 @@ def flat_earth_eom(t, x, amod):
     dx[3:6] = I_inv @ (M_b - np.cross(omega_b, I @ omega_b))
 
     # Kinematic equations
-    dx[6] = []
-    dx[7] = []
-    dx[8] = []
+    s_phi = math.sin(phi_rad)
+    c_phi = math.cos(phi_rad)
+    t_the = math.tan(theta_rad)
+    sec_the = 1.0 / math.cos(theta_rad)  # Note: singular at theta = +/- 90 deg
+
+    T_euler = np.array([
+        [1.0,  s_phi * t_the,    c_phi * t_the],
+        [0.0,  c_phi,           -s_phi        ],
+        [0.0,  s_phi * sec_the,  c_phi * sec_the]
+    ])
+
+    # omega_b = np.array([p_b_rps, q_b_rps, r_b_rps]) or slice x[3:6]
+    dx[6:9] = T_euler @ omega_b
 
     # Position (Navigation) Equations
-    dx[9] = []
-    dx[10] = []
-    dx[11] = []
+    dx[9] = 0
+    dx[10] = 0
+    dx[11] = 0
 
     return dx
     

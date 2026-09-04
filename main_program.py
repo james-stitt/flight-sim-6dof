@@ -1,3 +1,5 @@
+import math
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -8,20 +10,42 @@ from governing_equations import flat_earth_eom
 # Part 1: Initialization of simulation
 # =============================================================================
 
+# Define Vehicle
+r_sphere_m = 0.08
+m_sphere_kg = 5
+J_sphere_kgm2 = 0.4*m_sphere_kg*r_sphere_m**2
+
+
+amod = {
+    "m_kg": 1,
+    "Jxz_b_kgm2": 0,
+    "Jxx_b_kgm2": J_sphere_kgm2,
+    "Jyy_b_kgm2": J_sphere_kgm2,
+    "Jzz_b_kgm2": J_sphere_kgm2,
+}
+
+amod["I"] = np.array([
+    [ amod["Jxx_b_kgm2"],                 0.0, -amod["Jxz_b_kgm2"]],
+    [                 0.0,  amod["Jyy_b_kgm2"],                 0.0],
+    [-amod["Jxz_b_kgm2"],                 0.0,  amod["Jzz_b_kgm2"]],
+])
+
+amod["I_inv"] = np.linalg.inv(amod["I"])
+
 # Set initial conditions (these conditions may be loaded from an aircraft
 # trim routine in future versions of the code)
-u0_bf_mps  = []
-v0_bf_mps  = []
-w0_bf_mps  = []
-p0_bf_rps  = []
-q0_bf_rps  = []
-r0_bf_rps  = []
-phi0_rad   = []
-theta0_rad = []
-psi0_rad   = []
-p10_n_m    = []
-p20_n_m    = []
-p30_n_m    = []
+u0_bf_mps  = 0
+v0_bf_mps  = 0
+w0_bf_mps  = 0
+p0_bf_rps  = 0
+q0_bf_rps  = 0
+r0_bf_rps  = 0
+phi0_rad   = 0*math.pi/180
+theta0_rad = 0*math.pi/180
+psi0_rad   = 0
+p10_n_m    = 0
+p20_n_m    = 0
+p30_n_m    = 0
 
 # Assign initial conditions to an array
 x0 = np.array([
@@ -46,7 +70,7 @@ nx0 = x0.size
 # Set time conditions
 t0_s = 0.0
 tf_s = 10.0
-h_s = 0.01
+h_s = 0.005
 
 # =============================================================================
 # Part 2: Numerically approximate solutions to the governing equations
@@ -62,7 +86,7 @@ x[:, 0] = x0;
 
 # Numerically solve
 #t_s, x = numerical_integration_methods.forward_euler(flat_earth_eom.flat_earth_eom, t_s, x, h_s)
-t_s, x = numerical_integration_methods.rk4(flat_earth_eom.flat_earth_eom, t_s, x, h_s)
+t_s, x = numerical_integration_methods.rk4(flat_earth_eom.flat_earth_eom, t_s, x, h_s, amod)
 
 
 # Data post-processing actions
@@ -72,22 +96,73 @@ t_s, x = numerical_integration_methods.rk4(flat_earth_eom.flat_earth_eom, t_s, x
 # =============================================================================
 
 # Create subplots and set layout
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 6))  # 1 row, 2 columns
+fig, axes = plt.subplots(2, 4, figsize=(10, 6))
+fig.set_facecolor('black')
 
-# Plot line 1 on first subplot
-ax1.plot(t_s, x[0, :], label='Line 1')
-ax1.set_xlabel('Time (seconds)')
-ax1.set_ylabel('Line 1 Value')
-ax1.set_title('Line 1')
-ax1.grid(True)
+# Axial velocity u^b_CM/n
+axes[0, 0].plot(t_s, x[0,:], color='yellow')
+axes[0, 0].set_xlabel('Time [s]', color='white')
+axes[0, 0].set_ylabel('u [m/s]', color='white')
+axes[0, 0].grid(True)
+axes[0, 0].set_facecolor('black')
+axes[0, 0].tick_params(colors = 'white')
 
-# Plot line 2 on second subplot
-ax2.plot(t_s, x[1, :], label='Line 2')
-ax2.set_xlabel('Time (seconds)')
-ax2.set_ylabel('Line 2 Value')
-ax2.set_title('Line 2')
-ax2.grid(True)
+# y-axis velocity v^b_CM/n
+axes[0, 1].plot(t_s, x[1,:], color='yellow')
+axes[0, 1].set_xlabel('Time [s]', color='white')
+axes[0, 1].set_ylabel('v [m/s]', color='white')
+axes[0, 1].grid(True)
+axes[0, 1].set_facecolor('black')
+axes[0, 1].tick_params(colors = 'white')
 
-# Remaining plots to appear below
+# z-axis velocity w^b_CM/n
+axes[0, 2].plot(t_s, x[2,:], color='yellow')
+axes[0, 2].set_xlabel('Time [s]', color='white')
+axes[0, 2].set_ylabel('w [m/s]', color='white')
+axes[0, 2].grid(True)
+axes[0, 2].set_facecolor('black')
+axes[0, 2].tick_params(colors = 'white')
 
+# Roll angle, phi
+axes[0, 3].plot(t_s, x[6,:], color='yellow')
+axes[0, 3].set_xlabel('Time [s]', color='white')
+axes[0, 3].set_ylabel('phi [rad]', color='white')
+axes[0, 3].grid(True)
+axes[0, 3].set_facecolor('black')
+axes[0, 3].tick_params(colors = 'white')
+
+# Roll rate p^b_b/n
+axes[1, 0].plot(t_s, x[3,:], color='yellow')
+axes[1, 0].set_xlabel('Time [s]', color='white')
+axes[1, 0].set_ylabel('p [r/s]', color='white')
+axes[1, 0].grid(True)
+axes[1, 0].set_facecolor('black')
+axes[1, 0].tick_params(colors = 'white')
+
+# Pitch rate q^b_b/n
+axes[1, 1].plot(t_s, x[4,:], color='yellow')
+axes[1, 1].set_xlabel('Time [s]', color='white')
+axes[1, 1].set_ylabel('q [r/s]', color='white')
+axes[1, 1].grid(True)
+axes[1, 1].set_facecolor('black')
+axes[1, 1].tick_params(colors = 'white')
+
+# Yaw rate r^b_b/n
+axes[1, 2].plot(t_s, x[5,:], color='yellow')
+axes[1, 2].set_xlabel('Time [s]', color='white')
+axes[1, 2].set_ylabel('r [r/s]', color='white')
+axes[1, 2].grid(True)
+axes[1, 2].set_facecolor('black')
+axes[1, 2].tick_params(colors = 'white')
+
+# Pitch angle, theta
+axes[1, 3].plot(t_s, x[7,:], color='yellow')
+axes[1, 3].set_xlabel('Time [s]', color='white')
+axes[1, 3].set_ylabel('theta [rad]', color='white')
+axes[1, 3].grid(True)
+axes[1, 3].set_facecolor('black')
+axes[1, 3].tick_params(colors = 'white')
+
+plt.tight_layout()
+#plt.savefig('saved_figures/sphere_drop_test_1.png')
 plt.show()
