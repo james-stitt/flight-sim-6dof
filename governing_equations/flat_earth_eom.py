@@ -42,6 +42,15 @@ def flat_earth_eom(t, x, amod):
     p2_n_m = x[10]
     p3_n_m = x[11]
 
+    # Pre-Compute Trig Funcs
+    s_phi = math.sin(phi_rad)
+    s_theta = math.sin(theta_rad)
+    s_psi = math.sin(psi_rad)
+    c_phi = math.cos(phi_rad)
+    c_theta = math.cos(theta_rad)
+    c_psi = math.cos(psi_rad)
+    t_the = math.tan(theta_rad)
+
     v_b     = x[0:3]  # [u_b_mps, v_b_mps, w_b_mps]
     omega_b = x[3:6]  # [p_b_rps, q_b_rps, r_b_rps]
 
@@ -92,10 +101,7 @@ def flat_earth_eom(t, x, amod):
     dx[3:6] = I_inv @ (M_b - np.cross(omega_b, I @ omega_b))
 
     # Kinematic equations
-    s_phi = math.sin(phi_rad)
-    c_phi = math.cos(phi_rad)
-    t_the = math.tan(theta_rad)
-    sec_the = 1.0 / math.cos(theta_rad)  # Note: singular at theta = +/- 90 deg
+    sec_the = 1.0 / c_theta  # Note: singular at theta = +/- 90 deg
 
     T_euler = np.array([
         [1.0,  s_phi * t_the,    c_phi * t_the],
@@ -107,9 +113,15 @@ def flat_earth_eom(t, x, amod):
     dx[6:9] = T_euler @ omega_b
 
     # Position (Navigation) Equations
-    dx[9] = 0
-    dx[10] = 0
-    dx[11] = 0
+    # Direction Cosine Matrix: Body frame to NED frame (R_b_to_n)
+    R_b_to_n = np.array([
+        [c_theta * c_psi,  s_phi * s_theta * c_psi - c_phi * s_psi,  c_phi * s_theta * c_psi + s_phi * s_psi],
+        [c_theta * s_psi,  s_phi * s_theta * s_psi + c_phi * c_psi,  c_phi * s_theta * s_psi - s_phi * c_psi],
+        [       -s_theta,                          s_phi * c_theta,                          c_phi * c_theta]
+    ])
+
+    # Position (Navigation) equations: d/dt(p_ned) = R_b_to_n @ v_b
+    dx[9:12] = R_b_to_n @ v_b  # where v_b = x[0:3]
 
     return dx
     
