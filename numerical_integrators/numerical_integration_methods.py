@@ -1,0 +1,50 @@
+import numpy as np
+
+
+def forward_euler(f, t_s, x, h_s, *args):
+    """
+    Arguments:
+        f - function representing the right-hand side of the differential equation (dx/dt = f(t, x, *args)), function
+        t_s - vector of points in time at which numerical solutions will be approximated [s], 1D numpy array
+        x - state history array (shape: num_states x len(t_s)) with initial conditions at x[:, 0], 2D numpy array
+        h_s - integration time step size [s], scalar
+        *args - additional arguments passed directly to f (e.g., amod), tuple
+
+    Returns:
+        t_s - vector of points in time at which numerical solutions were approximated [s], 1D numpy array
+        x - numerically approximated state solution history across time, 2D numpy array
+    """
+    for i in range(1, len(t_s)):
+        t_prev = t_s[i - 1]
+        x_prev = x[:, i - 1]
+
+        x[:, i] = x_prev + h_s * f(t_prev, x_prev, *args)
+
+    return t_s, x
+
+
+def rk4(f, t_s, x, h_s, *args):
+    """
+    Arguments:
+        f - function representing the right-hand side of the differential equation (dx/dt = f(t, x, *args)), function
+        t_s - vector of points in time at which numerical solutions will be approximated [s], 1D numpy array
+        x - state history array (shape: num_states x len(t_s)) with initial conditions at x[:, 0], 2D numpy array
+        h_s - integration time step size [s], scalar
+        *args - additional arguments passed directly to f (e.g., amod), tuple
+
+    Returns:
+        t_s - vector of points in time at which numerical solutions were approximated [s], 1D numpy array
+        x - numerically approximated state solution history across time, 2D numpy array
+    """
+    for i in range(1, len(t_s)):
+        t_prev = t_s[i - 1]
+        x_prev = x[:, i - 1]
+
+        k1 = f(t_prev,                 x_prev,                     *args)
+        k2 = f(t_prev + 0.5 * h_s,     x_prev + 0.5 * h_s * k1,     *args)
+        k3 = f(t_prev + 0.5 * h_s,     x_prev + 0.5 * h_s * k2,     *args)
+        k4 = f(t_prev + h_s,           x_prev + h_s * k3,           *args)
+
+        x[:, i] = x_prev + (h_s / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+    return t_s, x
