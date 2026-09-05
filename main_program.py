@@ -1,273 +1,381 @@
 import math
+import os
+import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import ussa1976
 
 from numerical_integrators import numerical_integration_methods
 from governing_equations import flat_earth_eom
-#from tools.Interpolators import fastInterp1
-from vehicle_models.sphere import spheres
+from vehicle_models.dicts import spheres
 
 # =============================================================================
-# Part 1: Initialization of simulation
+# 1. CONSTANTS & UNIT CONVERSIONS
 # =============================================================================
+
+d2r = math.pi / 180.0
+r2d = 180.0 / math.pi
+f2m = 1/3.048
+
+# =============================================================================
+# 2. VEHICLE & ENVIRONMENT CONFIGURATION
+# =============================================================================
+
+# Define vehicle model
+vmod = spheres.NASASpheroid()
+veh_name = vmod["short_name"]
+model_3d_path = vmod.get("model_path", "ufo")
 
 # Atmospheric Data
 atmosphere = ussa1976.compute()
-
 amod = {
-    "alt_m" : atmosphere["z"].values, \
-    "rho_kgpm3" : atmosphere["rho"].values, \
-    "c_mps" : atmosphere["cs"].values, \
-    "g_mps2" : ussa1976.core.compute_gravity(atmosphere["z"].values)
+    "alt_m": atmosphere["z"].values,
+    "rho_kgpm3": atmosphere["rho"].values,
+    "c_mps": atmosphere["cs"].values,
+    "g_mps2": ussa1976.core.compute_gravity(atmosphere["z"].values),
 }
 
-# Define Vehicle
-vmod = spheres.BowlingBall()
+# =============================================================================
+# 3. SIMULATION SETUP & INITIAL CONDITIONS
+# =============================================================================
 
-# Set initial conditions (these conditions may be loaded from an aircraft
-# trim routine in future versions of the code)
-u0_bf_mps  = 0.0001
-v0_bf_mps  = 0
-w0_bf_mps  = 0
-p0_bf_rps  = 0
-q0_bf_rps  = 0
-r0_bf_rps  = 0
-phi0_rad   = 0*math.pi/180
-theta0_rad = -90*math.pi/180
-psi0_rad   = 0
-p10_n_m    = 0
-p20_n_m    = 0
-p30_n_m    = -30000
+# Time parameters
+t0_s = 0.0
+tf_s = 30.0
+h_s = 0.01
 
-# Assign initial conditions to an array
+# Data export toggle
+save_full_csv = False
+save_flightgear_csv = True
+save_data_dir = './case_studies/verification'
+
+# Plot export toggles
+save_dir = "./saved_figures"
+save_plot_6dof = False
+save_plot_airdata = False
+save_plot_ned = False
+
+# Initial state variables
+u0_bf_mps = 100
+v0_bf_mps = 0
+w0_bf_mps = 0.0
+p0_bf_rps = 0.0 * d2r
+q0_bf_rps = 0.0 * d2r
+r0_bf_rps = 0.0 * d2r
+phi0_rad = 0.0 * d2r
+theta0_rad = 0.0 * d2r
+psi0_rad = 0.0 * d2r
+p10_n_m = 0.0
+p20_n_m = 0.0
+p30_n_m = -10000.0 * f2m
+
+# Pack initial conditions into state array
 x0 = np.array([
-    u0_bf_mps,   # x-axis body-fixed velocity (m/s)
-    v0_bf_mps,   # y-axis body-fixed velocity (m/s)
-    w0_bf_mps,   # z-axis body-fixed velocity (m/s)
-    p0_bf_rps,   # roll rate (rad/s)
-    q0_bf_rps,   # pitch rate (rad/s)
-    r0_bf_rps,   # yaw rate (rad/s)
-    phi0_rad,    # roll angle (rad)
-    theta0_rad,  # pitch angle (rad)
-    psi0_rad,    # yaw angle (rad)
-    p10_n_m,     # x-axis position (N*m)
-    p20_n_m,     # y-axis position (N*m)
-    p30_n_m,     # z-axis position (N*m)
-])
+    u0_bf_mps,   # 0: x body-fixed velocity (m/s)
+    v0_bf_mps,   # 1: y body-fixed velocity (m/s)
+    w0_bf_mps,   # 2: z body-fixed velocity (m/s)
+    p0_bf_rps,   # 3: Roll rate (rad/s)
+    q0_bf_rps,   # 4: Pitch rate (rad/s)
+    r0_bf_rps,   # 5: Yaw rate (rad/s)
+    phi0_rad,    # 6: Roll angle (rad)
+    theta0_rad,  # 7: Pitch angle (rad)
+    psi0_rad,    # 8: Yaw angle (rad)
+    p10_n_m,     # 9: North position (m)
+    p20_n_m,     # 10: East position (m)
+    p30_n_m,     # 11: Down position (m)
+]).transpose()
 
-# Make the initial condition array a column vector
-x0 = x0.transpose(); 
 nx0 = x0.size
 
-# Set time conditions
-t0_s = 0.0
-tf_s = 100.0
-h_s = 0.005
-
 # =============================================================================
-# Part 2: Numerically approximate solutions to the governing equations
+# 4. NUMERICAL INTEGRATION
 # =============================================================================
 
-# Preallocate the solution array
-t_s = np.arange(t0_s, tf_s + h_s, h_s) 
+t_s = np.arange(t0_s, tf_s + h_s, h_s)
 nt_s = t_s.size
 x = np.empty((nx0, nt_s), dtype=float)
-
-# Assign the initial condition, x0, to solution array, x
 x[:, 0] = x0
 
-# Numerically solve
-#t_s, x = numerical_integration_methods.forward_euler(flat_earth_eom.flat_earth_eom, t_s, x, h_s)
-t_s, x = numerical_integration_methods.rk4(flat_earth_eom.flat_earth_eom, t_s, x, h_s, vmod, amod)
+# Solve using Runge-Kutta 4th Order
+t_s, x = numerical_integration_methods.rk4(
+    flat_earth_eom.flat_earth_eom, t_s, x, h_s, vmod, amod
+)
 
+# =============================================================================
+# 5. DATA POST-PROCESSING
+# =============================================================================
 
-# Data post-processing actions
+# --- Positions (NED) ---
+North_m = x[9, :]
+East_m = x[10, :]
+Down_m = x[11, :]
+Altitude_m = -Down_m
 
-# Altitude (NED z is down, so altitude is -z)
-Altitude_m = -x[11, :]
-
-# Atmosphere interpolation using standard numpy (or fastInterp1)
-Cs_mps    = np.interp(Altitude_m, amod["alt_m"], amod["c_mps"])
+# --- Atmospheric Interpolation & Air Data ---
+Cs_mps = np.interp(Altitude_m, amod["alt_m"], amod["c_mps"])
 Rho_kgpm3 = np.interp(Altitude_m, amod["alt_m"], amod["rho_kgpm3"])
-
-# Airspeed: norm across axes [u, v, w]
 True_Airspeed_mps = np.linalg.norm(x[0:3, :], axis=0)
 
-# Aerodynamic angles (np.arctan2 avoids divide-by-zero errors)
 Alpha_rad = np.arctan2(x[2, :], x[0, :])
-Beta_rad  = np.arcsin(np.clip(np.divide(x[1, :], True_Airspeed_mps, out=np.zeros_like(x[1, :]), where=True_Airspeed_mps != 0), -1.0, 1.0))
-
-# Mach number
+Beta_rad = np.arcsin(
+    np.clip(
+        np.divide(
+            x[1, :],
+            True_Airspeed_mps,
+            out=np.zeros_like(x[1, :]),
+            where=True_Airspeed_mps != 0,
+        ),
+        -1.0,
+        1.0,
+    )
+)
 Mach = True_Airspeed_mps / Cs_mps
 
+# --- NED Velocities via Direction Cosine Matrix (Body to NED) ---
+c_phi, s_phi = np.cos(x[6, :]), np.sin(x[6, :])
+c_th, s_th = np.cos(x[7, :]), np.sin(x[7, :])
+c_psi, s_psi = np.cos(x[8, :]), np.sin(x[8, :])
+
+v_North_mps = (
+    (c_th * c_psi) * x[0, :]
+    + (s_phi * s_th * c_psi - c_phi * s_psi) * x[1, :]
+    + (c_phi * s_th * c_psi + s_phi * s_psi) * x[2, :]
+)
+v_East_mps = (
+    (c_th * s_psi) * x[0, :]
+    + (s_phi * s_th * s_psi + c_phi * c_psi) * x[1, :]
+    + (c_phi * s_th * s_psi - s_phi * c_psi) * x[2, :]
+)
+v_Down_mps = (
+    (-s_th) * x[0, :]
+    + (s_phi * c_th) * x[1, :]
+    + (c_phi * c_th) * x[2, :]
+)
+v_Altitude_mps = -v_Down_mps
+
 # =============================================================================
-# Part 3: Plot data
+# 5b. SAVE SIMULATION DATA (FULL & FLIGHTGEAR CSV)
 # =============================================================================
 
-# Create subplots and set layout
-fig, axes = plt.subplots(2, 4, figsize=(10, 6))
-fig.set_facecolor('black')
+import pandas as pd
 
-# Axial velocity u^b_CM/n
-axes[0, 0].plot(t_s, x[0,:], color='yellow')
-axes[0, 0].set_xlabel('Time [s]', color='white')
-axes[0, 0].set_ylabel('u [m/s]', color='white')
-axes[0, 0].grid(True)
-axes[0, 0].set_facecolor('black')
-axes[0, 0].tick_params(colors = 'white')
+# Export toggles & directory
+save_full_csv = True
+save_flightgear_csv = True
+save_data_dir = "./case_studies/verification"
 
-# y-axis velocity v^b_CM/n
-axes[0, 1].plot(t_s, x[1,:], color='yellow')
-axes[0, 1].set_xlabel('Time [s]', color='white')
-axes[0, 1].set_ylabel('v [m/s]', color='white')
-axes[0, 1].grid(True)
-axes[0, 1].set_facecolor('black')
-axes[0, 1].tick_params(colors = 'white')
+# Reference geodetic anchor for Flat-Earth to WGS-84 conversion
+lat0_deg = 28.5721   # Reference latitude (e.g., Kennedy Space Center)
+lon0_deg = -80.6480  # Reference longitude
+R_earth = 6378137.0  # Equatorial radius (m)
 
-# z-axis velocity w^b_CM/n
-axes[0, 2].plot(t_s, x[2,:], color='yellow')
-axes[0, 2].set_xlabel('Time [s]', color='white')
-axes[0, 2].set_ylabel('w [m/s]', color='white')
-axes[0, 2].grid(True)
-axes[0, 2].set_facecolor('black')
-axes[0, 2].tick_params(colors = 'white')
+if save_full_csv or save_flightgear_csv:
+    os.makedirs(save_data_dir, exist_ok=True)
 
-# Roll angle, phi
-axes[0, 3].plot(t_s, x[6,:], color='yellow')
-axes[0, 3].set_xlabel('Time [s]', color='white')
-axes[0, 3].set_ylabel('phi [rad]', color='white')
-axes[0, 3].grid(True)
-axes[0, 3].set_facecolor('black')
-axes[0, 3].tick_params(colors = 'white')
+# -----------------------------------------------------------------------------
+# 1. Full Dataset Export (Comprehensive Engineering Log)
+# -----------------------------------------------------------------------------
+if save_full_csv:
+    full_data = {
+        # Time
+        "time_s": t_s,
+        # Body-frame translational velocities
+        "u_mps": x[0, :],
+        "v_mps": x[1, :],
+        "w_mps": x[2, :],
+        # Body-frame rotational rates
+        "p_rps": x[3, :],
+        "q_rps": x[4, :],
+        "r_rps": x[5, :],
+        # Euler angles
+        "phi_deg": np.rad2deg(x[6, :]),
+        "theta_deg": np.rad2deg(x[7, :]),
+        "psi_deg": np.rad2deg(x[8, :]),
+        # NED positions
+        "north_m": North_m,
+        "east_m": East_m,
+        "altitude_m": Altitude_m,
+        # NED velocities
+        "v_north_mps": v_North_mps,
+        "v_east_mps": v_East_mps,
+        "v_altitude_mps": v_Altitude_mps,
+        # Air data & atmosphere
+        "tas_mps": True_Airspeed_mps,
+        "mach": Mach,
+        "alpha_deg": np.rad2deg(Alpha_rad),
+        "beta_deg": np.rad2deg(Beta_rad),
+        "rho_kgpm3": Rho_kgpm3,
+        "speed_of_sound_mps": Cs_mps,
+    }
 
-# Roll rate p^b_b/n
-axes[1, 0].plot(t_s, x[3,:], color='yellow')
-axes[1, 0].set_xlabel('Time [s]', color='white')
-axes[1, 0].set_ylabel('p [r/s]', color='white')
-axes[1, 0].grid(True)
-axes[1, 0].set_facecolor('black')
-axes[1, 0].tick_params(colors = 'white')
+    full_df = pd.DataFrame(full_data)
+    full_csv_path = os.path.join(save_data_dir, f"{veh_name}_full_data.csv")
+    full_df.to_csv(full_csv_path, index=False)
 
-# Pitch rate q^b_b/n
-axes[1, 1].plot(t_s, x[4,:], color='yellow')
-axes[1, 1].set_xlabel('Time [s]', color='white')
-axes[1, 1].set_ylabel('q [r/s]', color='white')
-axes[1, 1].grid(True)
-axes[1, 1].set_facecolor('black')
-axes[1, 1].tick_params(colors = 'white')
+# -----------------------------------------------------------------------------
+# 2. FlightGear Replay Export (Generic Protocol Compatible)
+# -----------------------------------------------------------------------------
+if save_flightgear_csv:
+    # Coordinate transformation: Flat-Earth NED to Geodetic
+    lat_deg = lat0_deg + (North_m / R_earth) * r2d
+    lon_deg = lon0_deg + (East_m / (R_earth * np.cos(np.deg2rad(lat0_deg)))) * r2d
+    alt_ft = Altitude_m * 3.28084
 
-# Yaw rate r^b_b/n
-axes[1, 2].plot(t_s, x[5,:], color='yellow')
-axes[1, 2].set_xlabel('Time [s]', color='white')
-axes[1, 2].set_ylabel('r [r/s]', color='white')
-axes[1, 2].grid(True)
-axes[1, 2].set_facecolor('black')
-axes[1, 2].tick_params(colors = 'white')
+    fg_df = pd.DataFrame({
+        "time_s": t_s,
+        "lat_deg": lat_deg,
+        "lon_deg": lon_deg,
+        "alt_ft": alt_ft,
+        "roll_deg": np.rad2deg(x[6, :]),
+        "pitch_deg": np.rad2deg(x[7, :]),
+        "heading_deg": np.rad2deg(x[8, :]),
+    })
 
-# Pitch angle, theta
-axes[1, 3].plot(t_s, x[7,:], color='yellow')
-axes[1, 3].set_xlabel('Time [s]', color='white')
-axes[1, 3].set_ylabel('theta [rad]', color='white')
-axes[1, 3].grid(True)
-axes[1, 3].set_facecolor('black')
-axes[1, 3].tick_params(colors = 'white')
+    fg_csv_path = os.path.join(save_data_dir, f"{veh_name}_flightgear_replay.csv")
 
-plt.tight_layout()
-#plt.savefig('saved_figures/sphere_drop_test_1.png')
-plt.show()
+    # Write model path as metadata comment header, then write trajectory data
+    with open(fg_csv_path, "w") as f:
+        f.write(f"# model_path: {model_3d_path}\n")
+        fg_df.to_csv(f, index=False, header=False)
 
-# Create subplots and configure dark theme layout
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14, 5))
-fig.patch.set_facecolor('black')
+# =============================================================================
+# 6. VISUALIZATION
+# =============================================================================
 
-plot_color = 'magenta'
+if any([save_plot_6dof, save_plot_airdata, save_plot_ned]):
+    os.makedirs(save_dir, exist_ok=True)
 
-# 1. Angle of Attack
-ax1.plot(t_s, np.rad2deg(Alpha_rad), color=plot_color, linewidth=1.8)
-ax1.set_xlabel('Time [s]', color='white')
-ax1.set_ylabel('Angle of Attack [deg]', color='white')
-ax1.set_ylim([-30, 30])
-ax1.set_yticks(np.arange(-30, 31, 10))
+def apply_dark_theme(ax, xlabel="", ylabel="", title=""):
+    """Helper to maintain consistent styling across subplots."""
+    ax.set_facecolor("black")
+    ax.grid(True, color="gray", alpha=0.35)
+    ax.tick_params(colors="white")
+    ax.set_xlabel(xlabel, color="white")
+    ax.set_ylabel(ylabel, color="white")
+    if title:
+        ax.set_title(title, color="white", fontsize=10)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("white")
+    ax.spines["bottom"].set_color("white")
 
-# 2. Angle of Side Slip
-ax2.plot(t_s, np.rad2deg(Beta_rad), color=plot_color, linewidth=1.8)
-ax2.set_xlabel('Time [s]', color='white')
-ax2.set_ylabel('Angle of Side Slip [deg]', color='white')
-ax2.set_ylim([-30, 30])
-ax2.set_yticks(np.arange(-30, 31, 10))
+# -----------------------------------------------------------------------------
+# Plot 1: 6 Degrees of Freedom (Velocities, Rates, & Attitude)
+# -----------------------------------------------------------------------------
+fig_6dof, axes_6dof = plt.subplots(3, 3, figsize=(13, 8))
+fig_6dof.patch.set_facecolor("black")
+fig_6dof.suptitle(f"{veh_name} - 6 Degrees of Freedom", color="white", fontsize=14)
 
-# 3. Mach Number
-ax3.plot(t_s, Mach, color=plot_color, linewidth=1.8)
-ax3.set_xlabel('Time [s]', color='white')
-ax3.set_ylabel('Mach Number', color='white')
-ax3.set_ylim(bottom=0.0)
+c_6dof = "yellow"
 
-# Format axes and spines across all subplots
-for ax in (ax1, ax2, ax3):
-    ax.set_facecolor('black')
-    ax.grid(True, color='gray', alpha=0.45)
-    ax.tick_params(colors='white')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('white')
-    ax.spines['bottom'].set_color('white')
+# Row 1: Body Velocities (Translational DoF)
+axes_6dof[0, 0].plot(t_s, x[0, :], color=c_6dof)
+apply_dark_theme(axes_6dof[0, 0], xlabel="Time [s]", ylabel="u [m/s]", title="Axial Velocity (u)")
 
-plt.tight_layout()
-plt.show()
+axes_6dof[0, 1].plot(t_s, x[1, :], color=c_6dof)
+apply_dark_theme(axes_6dof[0, 1], xlabel="Time [s]", ylabel="v [m/s]", title="Side Velocity (v)")
 
-# Position variables from NED coordinates
-North_m    = x[9, :]
-East_m     = x[10, :]
-Altitude_m = -x[11, :]
+axes_6dof[0, 2].plot(t_s, x[2, :], color=c_6dof)
+apply_dark_theme(axes_6dof[0, 2], xlabel="Time [s]", ylabel="w [m/s]", title="Normal Velocity (w)")
 
-# Create 2x3 subplots with dark theme
-fig, axes = plt.subplots(2, 3, figsize=(12, 7))
-fig.patch.set_facecolor('black')
+# Row 2: Body Angular Rates (Rotational DoF)
+axes_6dof[1, 0].plot(t_s, x[3, :], color=c_6dof)
+apply_dark_theme(axes_6dof[1, 0], xlabel="Time [s]", ylabel="p [rad/s]", title="Roll Rate (p)")
 
-plot_color = '#00f5ff'
+axes_6dof[1, 1].plot(t_s, x[4, :], color=c_6dof)
+apply_dark_theme(axes_6dof[1, 1], xlabel="Time [s]", ylabel="q [rad/s]", title="Pitch Rate (q)")
 
-# --- Row 1: Position vs Time ---
-# North vs Time
-axes[0, 0].plot(t_s, North_m, color=plot_color, linewidth=1.8)
-axes[0, 0].set_xlabel('Time [s]', color='white')
-axes[0, 0].set_ylabel('North [m]', color='white')
+axes_6dof[1, 2].plot(t_s, x[5, :], color=c_6dof)
+apply_dark_theme(axes_6dof[1, 2], xlabel="Time [s]", ylabel="r [rad/s]", title="Yaw Rate (r)")
 
-# East vs Time
-axes[0, 1].plot(t_s, East_m, color=plot_color, linewidth=1.8)
-axes[0, 1].set_xlabel('Time [s]', color='white')
-axes[0, 1].set_ylabel('East [m]', color='white')
+# Row 3: Euler Angles
+axes_6dof[2, 0].plot(t_s, np.rad2deg(x[6, :]), color=c_6dof)
+apply_dark_theme(axes_6dof[2, 0], xlabel="Time [s]", ylabel="phi [deg]", title="Roll Angle (phi)")
 
-# Altitude vs Time
-axes[0, 2].plot(t_s, Altitude_m, color=plot_color, linewidth=1.8)
-axes[0, 2].set_xlabel('Time [s]', color='white')
-axes[0, 2].set_ylabel('Altitude [m]', color='white')
+axes_6dof[2, 1].plot(t_s, np.rad2deg(x[7, :]), color=c_6dof)
+apply_dark_theme(axes_6dof[2, 1], xlabel="Time [s]", ylabel="theta [deg]", title="Pitch Angle (theta)")
 
-# --- Row 2: Trajectory Projections ---
-# North vs East (Horizontal plane)
-axes[1, 0].plot(East_m, North_m, color=plot_color, linewidth=1.8)
-axes[1, 0].set_xlabel('East [m]', color='white')
-axes[1, 0].set_ylabel('North [m]', color='white')
+axes_6dof[2, 2].plot(t_s, np.rad2deg(x[8, :]), color=c_6dof)
+apply_dark_theme(axes_6dof[2, 2], xlabel="Time [s]", ylabel="psi [deg]", title="Yaw Angle (psi)")
 
-# Altitude vs East (Vertical plane)
-axes[1, 1].plot(East_m, Altitude_m, color=plot_color, linewidth=1.8)
-axes[1, 1].set_xlabel('East [m]', color='white')
-axes[1, 1].set_ylabel('Altitude [m]', color='white')
+fig_6dof.tight_layout()
 
-# Altitude vs North (Vertical plane)
-axes[1, 2].plot(North_m, Altitude_m, color=plot_color, linewidth=1.8)
-axes[1, 2].set_xlabel('North [m]', color='white')
-axes[1, 2].set_ylabel('Altitude [m]', color='white')
+if save_plot_6dof:
+    fig_6dof.savefig(
+        os.path.join(save_dir, f"{veh_name}_6dof.png"),
+        facecolor=fig_6dof.get_facecolor(),
+    )
 
-# Style all axes
-for ax in axes.flat:
-    ax.set_facecolor('black')
-    ax.grid(True, color='gray', alpha=0.45)
-    ax.tick_params(colors='white')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('white')
-    ax.spines['bottom'].set_color('white')
+# -----------------------------------------------------------------------------
+# Plot 2: Air Data (Aerodynamic Angles, Mach, True Airspeed)
+# -----------------------------------------------------------------------------
+fig_air, axes_air = plt.subplots(2, 2, figsize=(11, 7))
+fig_air.patch.set_facecolor("black")
+fig_air.suptitle(f"{veh_name} - Air Data", color="white", fontsize=14)
 
-plt.tight_layout()
+c_air = "magenta"
+
+axes_air[0, 0].plot(t_s, np.rad2deg(Alpha_rad), color=c_air, linewidth=1.8)
+apply_dark_theme(axes_air[0, 0], xlabel="Time [s]", ylabel="Alpha [deg]", title="Angle of Attack")
+
+axes_air[0, 1].plot(t_s, np.rad2deg(Beta_rad), color=c_air, linewidth=1.8)
+apply_dark_theme(axes_air[0, 1], xlabel="Time [s]", ylabel="Beta [deg]", title="Angle of Sideslip")
+
+axes_air[1, 0].plot(t_s, Mach, color=c_air, linewidth=1.8)
+axes_air[1, 0].set_ylim(bottom=0.0)
+apply_dark_theme(axes_air[1, 0], xlabel="Time [s]", ylabel="Mach [-]", title="Mach Number")
+
+axes_air[1, 1].plot(t_s, True_Airspeed_mps, color=c_air, linewidth=1.8)
+axes_air[1, 1].set_ylim(bottom=0.0)
+apply_dark_theme(axes_air[1, 1], xlabel="Time [s]", ylabel="Airspeed [m/s]", title="True Airspeed")
+
+fig_air.tight_layout()
+
+if save_plot_airdata:
+    fig_air.savefig(
+        os.path.join(save_dir, f"{veh_name}_air_data.png"),
+        facecolor=fig_air.get_facecolor(),
+    )
+
+# -----------------------------------------------------------------------------
+# Plot 3: NED Kinematics (Positions and Velocities)
+# -----------------------------------------------------------------------------
+fig_ned, axes_ned = plt.subplots(2, 3, figsize=(13, 7))
+fig_ned.patch.set_facecolor("black")
+fig_ned.suptitle(f"{veh_name} - NED Kinematics", color="white", fontsize=14)
+
+c_ned = "#00f5ff"
+
+# Row 1: NED Positions
+axes_ned[0, 0].plot(t_s, North_m, color=c_ned, linewidth=1.8)
+apply_dark_theme(axes_ned[0, 0], xlabel="Time [s]", ylabel="North [m]", title="North Position")
+
+axes_ned[0, 1].plot(t_s, East_m, color=c_ned, linewidth=1.8)
+apply_dark_theme(axes_ned[0, 1], xlabel="Time [s]", ylabel="East [m]", title="East Position")
+
+axes_ned[0, 2].plot(t_s, Altitude_m, color=c_ned, linewidth=1.8)
+apply_dark_theme(axes_ned[0, 2], xlabel="Time [s]", ylabel="Altitude [m]", title="Altitude (-Down)")
+
+# Row 2: NED Velocities
+axes_ned[1, 0].plot(t_s, v_North_mps, color=c_ned, linewidth=1.8)
+apply_dark_theme(axes_ned[1, 0], xlabel="Time [s]", ylabel="v_North [m/s]", title="North Velocity")
+
+axes_ned[1, 1].plot(t_s, v_East_mps, color=c_ned, linewidth=1.8)
+apply_dark_theme(axes_ned[1, 1], xlabel="Time [s]", ylabel="v_East [m/s]", title="East Velocity")
+
+axes_ned[1, 2].plot(t_s, v_Altitude_mps, color=c_ned, linewidth=1.8)
+apply_dark_theme(axes_ned[1, 2], xlabel="Time [s]", ylabel="v_Altitude [m/s]", title="Climb Rate (-v_Down)")
+
+fig_ned.tight_layout()
+
+if save_plot_ned:
+    fig_ned.savefig(
+        os.path.join(save_dir, f"{veh_name}_ned_data.png"),
+        facecolor=fig_ned.get_facecolor(),
+    )
+
+# =============================================================================
+# 7. DISPLAY ALL WINDOWS SIMULTANEOUSLY
+# =============================================================================
+# Calling plt.show() once here displays all open figures at the same time.
 plt.show()

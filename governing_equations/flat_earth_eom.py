@@ -93,7 +93,7 @@ def flat_earth_eom(t, x, vmod, amod):
     g_b = np.array([gx_b_mps2, gy_b_mps2, gz_b_mps2])
 
     # Aerodynamic Forces
-    drag_kgmps2 = vmod["CD_approx"]*qbar_kgpms2*vmod["Aref_m2"]
+    drag_kgmps2 = vmod["CD"]*qbar_kgpms2*vmod["Aref_m2"]
     side_kgmps2 = 0
     lift_kgmps2 = 0
 
