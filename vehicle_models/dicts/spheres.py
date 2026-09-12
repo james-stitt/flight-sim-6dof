@@ -40,7 +40,7 @@ def NASASpheroid():
     vmod = {
         "short_name": "NASA_spheroid",
         # Relative or absolute path to the 3D model geometry
-        "model_path": "./vehicle_models/3d_models/sphere.xml",
+        "model_path": "./vehicle_models/3d_models/Spitfire/spitfire9.ac",
         "m_kg": m_kg,
         "Jxz_b_kgm2": 0.0,
         "Jxx_b_kgm2": J_diag_kgm2,

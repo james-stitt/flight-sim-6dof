@@ -100,7 +100,7 @@ def prepare_aircraft_package(model_path):
     # Only generate if the file does NOT exist, preserving manual edits
     if not os.path.exists(set_xml_path):
         cam_dist = 25.0
-        cam_height = 4.0
+        cam_height = 9.0
         set_xml_content = f"""<?xml version="1.0"?>
 <PropertyList>
   <sim>
